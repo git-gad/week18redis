@@ -1,0 +1,75 @@
+version: "3.9"
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: alarm-mongo
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: echo 'db.runCommand({ping:1}).ok' | mongosh admin -u $$MONGO_INITDB_ROOT_USERNAME -p $$MONGO_INITDB_ROOT_PASSWORD --quiet | grep 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: alarm-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build: 
+      context: .
+      dockerfile: analytics-api/Dockerfile
+    container_name: alarm-api
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGO_URI=mongodb://mongo:27017
+      - MONGO_DB=alarms_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  producer-redis:
+    build: 
+      context: .
+      dockerfile: producer/Dockerfile
+    container_name: producer-redis
+    command: python main.py
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+    - REDIS_HOST=redis
+    - REDIS_PORT=6379
+
+  consumer-redis:
+    build: 
+      context: .
+      dockerfile: consumer/Dockerfile
+    container_name: consumer-redis
+    command: python main.py
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+    - REDIS_HOST=redis
+    - REDIS_PORT=6379
+    - MONGO_URI=mongodb://mongo:27017
+    - MONGO_DB=alarms_db
+  
+
